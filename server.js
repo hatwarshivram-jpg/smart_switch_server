@@ -5,11 +5,12 @@ const { smarthome } = require('actions-on-google');
 const app = express();
 const PORT = process.env.PORT || 10000;
 
+// Express Middlewares
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// LED State stored in memory
+// LED State stored in memory (false = OFF, true = ON)
 let ledState = false;
 
 // -------------------------------------------------------------
@@ -29,22 +30,24 @@ app.post('/api/led/toggle', (req, res) => {
 });
 
 // -------------------------------------------------------------
-// 2. OAuth2 Authorization Endpoints (Required by Google Home)
-// Handles both /auth and /oauth/authorize
+// 2. Google OAuth2 Authentication Endpoints
 // -------------------------------------------------------------
+
+// Handles Google Home Authorization requests
 app.get(['/auth', '/oauth/authorize'], (req, res) => {
     const redirectUri = req.query.redirect_uri;
     const state = req.query.state;
 
+    // Google requires a redirect containing authorization code and state
     if (redirectUri) {
-        // Redirect back to Google Home app with auth code
         return res.redirect(`${redirectUri}?code=dummy_auth_code&state=${state}`);
     }
-    res.status(200).send("OAuth Auth Endpoint Working!");
+    
+    res.status(200).send("OAuth Authorization Endpoint Active");
 });
 
-app.post('/token', (req, res) => {
-    // Send access token back to Google Home
+// Handles Google Home Token requests
+app.all(['/token', '/oauth/token'], (req, res) => {
     res.json({
         token_type: 'bearer',
         access_token: 'dummy_access_token',
@@ -57,9 +60,10 @@ app.post('/token', (req, res) => {
 // 3. Google Smart Home Fulfillment Engine
 // -------------------------------------------------------------
 const appSmartHome = smarthome({
-    jwt: null
+    jwt: null // Bypasses service account key check for development
 });
 
+// SYNC Intent: Google asks what devices exist
 appSmartHome.onSync((body) => {
     return {
         requestId: body.requestId,
@@ -80,6 +84,7 @@ appSmartHome.onSync((body) => {
     };
 });
 
+// QUERY Intent: Google asks for current device state
 appSmartHome.onQuery((body) => {
     return {
         requestId: body.requestId,
@@ -94,6 +99,7 @@ appSmartHome.onQuery((body) => {
     };
 });
 
+// EXECUTE Intent: Google sends ON/OFF commands from voice or app
 appSmartHome.onExecute((body) => {
     const commands = body.inputs[0].payload.commands;
     const results = [];
@@ -122,8 +128,10 @@ appSmartHome.onExecute((body) => {
     };
 });
 
+// Route Google Smart Home fulfillment traffic
 app.post('/smarthome', appSmartHome);
 
+// Start Server
 app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
 });
