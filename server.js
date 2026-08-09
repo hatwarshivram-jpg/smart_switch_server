@@ -10,7 +10,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// LED State stored in memory (false = OFF, true = ON)
+// LED State stored in memory
 let ledState = false;
 
 // -------------------------------------------------------------
@@ -30,29 +30,59 @@ app.post('/api/led/toggle', (req, res) => {
 });
 
 // -------------------------------------------------------------
-// 2. Google OAuth2 Authentication Endpoints
+// 2. Google OAuth2 Login & Authorization Page
 // -------------------------------------------------------------
 
-// Handles Google Home Authorization requests
+// Interactive OAuth Login Screen for Google Home App
 app.get(['/auth', '/oauth/authorize'], (req, res) => {
     const redirectUri = req.query.redirect_uri;
     const state = req.query.state;
 
-    // Google requires a redirect containing authorization code and state
-    if (redirectUri) {
-        return res.redirect(`${redirectUri}?code=dummy_auth_code&state=${state}`);
+    if (!redirectUri) {
+        return res.status(200).send("OAuth Authorization Endpoint Active");
     }
-    
-    res.status(200).send("OAuth Authorization Endpoint Active");
+
+    // Serve a simple HTML page that Google Home's in-app browser can render
+    res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>Link Smart Switch</title>
+            <style>
+                body { font-family: sans-serif; text-align: center; padding: 40px 20px; background: #0f172a; color: #fff; }
+                .card { background: #1e293b; padding: 30px; border-radius: 16px; max-width: 320px; margin: auto; }
+                button { background: #3b82f6; color: white; border: none; padding: 14px 28px; font-size: 16px; font-weight: bold; border-radius: 8px; cursor: pointer; width: 100%; margin-top: 20px; }
+            </style>
+        </head>
+        <body>
+            <div class="card">
+                <h2>ESP32 Smart Switch</h2>
+                <p>Click below to link your switch with Google Home.</p>
+                <form action="/auth-confirm" method="POST">
+                    <input type="hidden" name="redirect_uri" value="${redirectUri}">
+                    <input type="hidden" name="state" value="${state}">
+                    <button type="submit">Authorize Google Home</button>
+                </form>
+            </div>
+        </body>
+        </html>
+    `);
 });
 
-// Handles Google Home Token requests
+// Confirmation Endpoint: Redirects back to Google with valid authorization code
+app.post('/auth-confirm', (req, res) => {
+    const { redirect_uri, state } = req.body;
+    res.redirect(`${redirect_uri}?code=valid_dummy_code&state=${state}`);
+});
+
+// Token Exchange Endpoint
 app.all(['/token', '/oauth/token'], (req, res) => {
     res.json({
         token_type: 'bearer',
-        access_token: 'dummy_access_token',
-        refresh_token: 'dummy_refresh_token',
-        expires_in: 3600
+        access_token: 'valid_access_token_123',
+        refresh_token: 'valid_refresh_token_123',
+        expires_in: 86400
     });
 });
 
@@ -60,15 +90,14 @@ app.all(['/token', '/oauth/token'], (req, res) => {
 // 3. Google Smart Home Fulfillment Engine
 // -------------------------------------------------------------
 const appSmartHome = smarthome({
-    jwt: null // Bypasses service account key check for development
+    jwt: null
 });
 
-// SYNC Intent: Google asks what devices exist
 appSmartHome.onSync((body) => {
     return {
         requestId: body.requestId,
         payload: {
-            agentUserId: 'user_123',
+            agentUserId: 'esp32_user_1',
             devices: [{
                 id: 'esp32_switch_1',
                 type: 'action.devices.types.SWITCH',
@@ -84,7 +113,6 @@ appSmartHome.onSync((body) => {
     };
 });
 
-// QUERY Intent: Google asks for current device state
 appSmartHome.onQuery((body) => {
     return {
         requestId: body.requestId,
@@ -99,7 +127,6 @@ appSmartHome.onQuery((body) => {
     };
 });
 
-// EXECUTE Intent: Google sends ON/OFF commands from voice or app
 appSmartHome.onExecute((body) => {
     const commands = body.inputs[0].payload.commands;
     const results = [];
@@ -128,10 +155,8 @@ appSmartHome.onExecute((body) => {
     };
 });
 
-// Route Google Smart Home fulfillment traffic
 app.post('/smarthome', appSmartHome);
 
-// Start Server
 app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
 });
